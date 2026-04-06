@@ -4,6 +4,17 @@ import time
 import sys
 import ctypes
 import webbrowser
+import os
+
+def is_admin():
+    try:
+        return ctypes.windll.shell32.IsUserAnAdmin()
+    except Exception:
+        return False
+
+if not is_admin():
+    ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, " ".join(sys.argv), None, 1)
+    sys.exit()
 
 try:
     from PIL import Image, ImageTk, ImageDraw
@@ -58,6 +69,13 @@ CONFIG = {
     "min_size":         180,
     "max_size":         700,
     "size_step":        50,
+    "zoom":             1.0,
+    "zoom_min":         1.0,
+    "zoom_max":         5.0,
+    "zoom_step":        0.25,
+    "zoom_pan_x":       0.5,
+    "zoom_pan_y":       0.5,
+    "zoom_pan_step":    0.05,
 }
 
 
@@ -132,6 +150,25 @@ def crop_to_map(img):
     elif ch > cw:
         d = (ch - cw) // 2
         img = img.crop((0, d, cw, d + cw))
+
+    # apply zoom by cropping into a smaller region then letting resize handle it
+    zoom = CONFIG["zoom"]
+    if zoom > 1.0:
+        zw = int(img.width  / zoom)
+        zh = int(img.height / zoom)
+        cx = int(CONFIG["zoom_pan_x"] * img.width)
+        cy = int(CONFIG["zoom_pan_y"] * img.height)
+        x1 = max(0, cx - zw // 2)
+        y1 = max(0, cy - zh // 2)
+        x2 = min(img.width,  x1 + zw)
+        y2 = min(img.height, y1 + zh)
+        # clamp if we hit an edge
+        if x2 - x1 < zw:
+            x1 = max(0, x2 - zw)
+        if y2 - y1 < zh:
+            y1 = max(0, y2 - zh)
+        img = img.crop((x1, y1, x2, y2))
+
     return img
 
 
@@ -288,15 +325,19 @@ class Overlay:
 
         self.root = tk.Tk()
         self.root.title("DinoNav")
-        self.root.overrideredirect(True)
-        self.root.attributes("-topmost", True)
-        self.root.attributes("-alpha", CONFIG["overlay_opacity"])
-        self.root.configure(bg=DARK_BG)
-        self.root.wm_attributes("-transparentcolor", DARK_BG)
-        x, y = CONFIG["overlay_pos"]
-        self.root.geometry(f"+{x}+{y}")
+        self.root.withdraw()
 
-        self.canvas = tk.Canvas(self.root, width=self.size, height=self.size,
+        self.win = tk.Toplevel(self.root)
+        self.win.title("DinoNav")
+        self.win.overrideredirect(True)
+        self.win.attributes("-topmost", True)
+        self.win.attributes("-alpha", CONFIG["overlay_opacity"])
+        self.win.configure(bg=DARK_BG)
+        self.win.wm_attributes("-transparentcolor", DARK_BG)
+        x, y = CONFIG["overlay_pos"]
+        self.win.geometry(f"+{x}+{y}")
+
+        self.canvas = tk.Canvas(self.win, width=self.size, height=self.size,
                                 bg=DARK_BG, highlightthickness=0, cursor="fleur")
         self.canvas.pack()
 
@@ -308,13 +349,17 @@ class Overlay:
         if KEYBOARD_AVAILABLE:
             keyboard.add_hotkey("ctrl+m",    self.toggle)
             keyboard.add_hotkey("ctrl+r",    self.force_refresh)
-            keyboard.add_hotkey("ctrl+up",   self.size_up)
-            keyboard.add_hotkey("ctrl+down", self.size_down)
             keyboard.add_hotkey("ctrl+q",    self.quit)
+            keyboard.add_hotkey("ctrl+up",   self.zoom_in)
+            keyboard.add_hotkey("ctrl+down", self.zoom_out)
             keyboard.add_hotkey("ctrl+]",    self.crop_left_more)
             keyboard.add_hotkey("ctrl+[",    self.crop_left_less)
             keyboard.add_hotkey("ctrl+p",    self.crop_top_more)
             keyboard.add_hotkey("ctrl+;",    self.crop_top_less)
+            keyboard.add_hotkey("ctrl+shift+up",    self.pan_up)
+            keyboard.add_hotkey("ctrl+shift+down",  self.pan_down)
+            keyboard.add_hotkey("ctrl+shift+left",  self.pan_left)
+            keyboard.add_hotkey("ctrl+shift+right", self.pan_right)
 
         self._set_ct(True)
         self._draw_placeholder()
@@ -324,7 +369,7 @@ class Overlay:
     def _drag_start(self, e):
         self._set_ct(False)
         self.drag_start = (e.x_root, e.y_root)
-        geo = self.root.geometry()
+        geo = self.win.geometry()
         _, pos = geo.split("+", 1)
         px, py = pos.split("+")
         self.drag_origin = (int(px), int(py))
@@ -333,7 +378,7 @@ class Overlay:
         if self.drag_start:
             dx = e.x_root - self.drag_start[0]
             dy = e.y_root - self.drag_start[1]
-            self.root.geometry(f"+{self.drag_origin[0]+dx}+{self.drag_origin[1]+dy}")
+            self.win.geometry(f"+{self.drag_origin[0]+dx}+{self.drag_origin[1]+dy}")
 
     def _drag_end(self, e):
         self.drag_start = None
@@ -356,16 +401,21 @@ class Overlay:
         m = tk.Menu(self.root, tearoff=0, bg=PANEL_BG, fg=TEXT_PRI,
                     activebackground=ACCENT, activeforeground=DARK_BG, bd=0, relief="flat")
         m.add_command(label=f"  {self.server_key}  •  {self.status}", state="disabled")
-        m.add_command(label=f"  left crop: {CONFIG['crop_left']:.3f}   top crop: {CONFIG['crop_top']:.3f}", state="disabled")
+        m.add_command(label=f"  zoom: {CONFIG['zoom']:.2f}x   crop L:{CONFIG['crop_left']:.3f} T:{CONFIG['crop_top']:.3f}", state="disabled")
         m.add_separator()
-        m.add_command(label="  Toggle visibility      Ctrl+M",  command=self.toggle)
-        m.add_command(label="  Size up                Ctrl+↑",  command=self.size_up)
-        m.add_command(label="  Size down              Ctrl+↓",  command=self.size_down)
-        m.add_command(label="  Crop left +            Ctrl+]",  command=self.crop_left_more)
-        m.add_command(label="  Crop left -            Ctrl+[",  command=self.crop_left_less)
-        m.add_command(label="  Crop top +             Ctrl+P",  command=self.crop_top_more)
-        m.add_command(label="  Crop top -             Ctrl+;",  command=self.crop_top_less)
-        m.add_command(label="  Force refresh          Ctrl+R",  command=self.force_refresh)
+        m.add_command(label="  Toggle visibility        Ctrl+M",        command=self.toggle)
+        m.add_command(label="  Zoom in                  Ctrl+↑",        command=self.zoom_in)
+        m.add_command(label="  Zoom out                 Ctrl+↓",        command=self.zoom_out)
+        m.add_command(label="  Pan up                   Ctrl+Shift+↑",  command=self.pan_up)
+        m.add_command(label="  Pan down                 Ctrl+Shift+↓",  command=self.pan_down)
+        m.add_command(label="  Pan left                 Ctrl+Shift+←",  command=self.pan_left)
+        m.add_command(label="  Pan right                Ctrl+Shift+→",  command=self.pan_right)
+        m.add_command(label="  Reset zoom & pan         ",               command=self.zoom_reset)
+        m.add_command(label="  Crop left +              Ctrl+]",         command=self.crop_left_more)
+        m.add_command(label="  Crop left -              Ctrl+[",         command=self.crop_left_less)
+        m.add_command(label="  Crop top +               Ctrl+P",         command=self.crop_top_more)
+        m.add_command(label="  Crop top -               Ctrl+;",         command=self.crop_top_less)
+        m.add_command(label="  Force refresh            Ctrl+R",         command=self.force_refresh)
         m.add_separator()
         m.add_command(label="  Bring browser back",             command=self._restore)
         m.add_separator()
@@ -378,18 +428,38 @@ class Overlay:
 
     def toggle(self):
         self.visible = not self.visible
-        self.root.attributes("-alpha", CONFIG["overlay_opacity"] if self.visible else 0.0)
+        self.win.attributes("-alpha", CONFIG["overlay_opacity"] if self.visible else 0.0)
 
     def force_refresh(self): self.last_time = 0
 
-    def size_up(self):
-        self.size = min(self.size + CONFIG["size_step"], CONFIG["max_size"])
-        self.canvas.config(width=self.size, height=self.size)
+    def zoom_in(self):
+        CONFIG["zoom"] = round(min(CONFIG["zoom"] + CONFIG["zoom_step"], CONFIG["zoom_max"]), 2)
         self.force_refresh()
 
-    def size_down(self):
-        self.size = max(self.size - CONFIG["size_step"], CONFIG["min_size"])
-        self.canvas.config(width=self.size, height=self.size)
+    def zoom_out(self):
+        CONFIG["zoom"] = round(max(CONFIG["zoom"] - CONFIG["zoom_step"], CONFIG["zoom_min"]), 2)
+        self.force_refresh()
+
+    def zoom_reset(self):
+        CONFIG["zoom"]       = 1.0
+        CONFIG["zoom_pan_x"] = 0.5
+        CONFIG["zoom_pan_y"] = 0.5
+        self.force_refresh()
+
+    def pan_up(self):
+        CONFIG["zoom_pan_y"] = round(max(CONFIG["zoom_pan_y"] - CONFIG["zoom_pan_step"], 0.0), 3)
+        self.force_refresh()
+
+    def pan_down(self):
+        CONFIG["zoom_pan_y"] = round(min(CONFIG["zoom_pan_y"] + CONFIG["zoom_pan_step"], 1.0), 3)
+        self.force_refresh()
+
+    def pan_left(self):
+        CONFIG["zoom_pan_x"] = round(max(CONFIG["zoom_pan_x"] - CONFIG["zoom_pan_step"], 0.0), 3)
+        self.force_refresh()
+
+    def pan_right(self):
+        CONFIG["zoom_pan_x"] = round(min(CONFIG["zoom_pan_x"] + CONFIG["zoom_pan_step"], 1.0), 3)
         self.force_refresh()
 
     def crop_left_more(self):
