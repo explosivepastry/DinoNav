@@ -31,10 +31,9 @@ pip install pillow pywin32 keyboard
 
 1. Open `eu.dinoden.gg/map` or `na.dinoden.gg/map` in Chrome or Edge and log in
 2. Run DinoNav and select your server (EU or NA)
-3. Click **Hide Browser** — this moves the browser off-screen so it doesn't cover your game, but keeps it rendering in the background
-4. Click **Launch DinoNav**
-5. Switch The Isle to **Borderless Windowed** mode
-6. The minimap will appear in the top-left corner of your screen
+3. Click **Launch DinoNav**
+4. Switch The Isle to **Borderless Windowed** mode
+5. The minimap will appear in the top-left corner of your screen
 
 ---
 
