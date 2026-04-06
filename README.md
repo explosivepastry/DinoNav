@@ -1,6 +1,6 @@
 # DinoNav
 
-A lightweight minimap overlay for **The Isle: Evrima** that captures the live [Dino Den](https://eu.dinoden.gg) map and displays it on top of your game in real time.
+A minimap overlay for **The Isle: Evrima** that captures the live [Dino Den](https://eu.dinoden.gg) map and displays it on top of your game in real time.
 
 ![Python](https://img.shields.io/badge/python-3.8%2B-blue) ![Platform](https://img.shields.io/badge/platform-Windows-lightgrey) ![License](https://img.shields.io/badge/license-MIT-green)
 
@@ -8,7 +8,7 @@ A lightweight minimap overlay for **The Isle: Evrima** that captures the live [D
 
 ## How it works
 
-DinoNav uses the Windows `PrintWindow` API to capture your browser window directly from its render buffer — meaning it keeps working even when the browser is completely hidden behind your game. No screen recording, no game memory access, no anti-cheat risk.
+DinoNav uses the Windows `PrintWindow` API to capture your browser window directly from its render buffer meaning it keeps working even when the browser is completely hidden behind your game.
 
 ---
 
@@ -66,7 +66,6 @@ DinoNav captures the full browser window and crops out the Dino Den sidebar and 
 
 - The browser must stay open (even off-screen) for the minimap to update
 - If DinoNav can't find your browser, make sure the Dino Den map tab is open and the window title contains "dinoden"
-- Right-click the minimap and choose **Bring browser back** if you need to interact with it
 - Refresh rate is every 3 seconds by default — you can change `refresh_interval` in the `CONFIG` dict at the top of the script
 
 ---
